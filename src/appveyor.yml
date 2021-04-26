@@ -29,3 +29,6 @@ build_script:
 environment:
   COVERALLS_REPO_TOKEN:
     secure: 0wXxQdMQF5yHgpUe3heAG5zY2YYNBZYEF9FmgqoQi6b6IC0JibAA+idcnOkwTeEg
+
+artifacts:
+  - path: EntityFramework.Exceptions.Tests\TestResults
