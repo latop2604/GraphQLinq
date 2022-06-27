@@ -5,22 +5,21 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Net;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-using Newtonsoft.Json.Serialization;
+using System.Text.Json;
 
 namespace GraphQLinq
 {
     class GraphQueryEnumerator<T, TSource> : IEnumerator<T>
     {
         private IEnumerator<T> listEnumerator;
+        private JsonDocument jsonDocument;
 
         private readonly string query;
         private readonly string baseUrl;
         private readonly string authorization;
         private readonly QueryType queryType;
         private readonly Func<TSource, T> mapper;
-        private readonly IContractResolver resolver;
+        private readonly JsonSerializerOptions jsonSerializerOptions;
 
         private const string DataPathPropertyName = "data";
         private const string ErrorPathPropertyName = "errors";
@@ -31,53 +30,63 @@ namespace GraphQLinq
             this.mapper = mapper;
             this.queryType = queryType;
             baseUrl = context.BaseUrl;
-            resolver = context.ContractResolver ?? new DefaultContractResolver();
+            jsonSerializerOptions = context.JsonSerializerOptions ?? new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
+            };
             authorization = context.Authorization;
         }
 
         public void Dispose()
         {
-            listEnumerator.Dispose();
+            listEnumerator?.Dispose();
+            jsonDocument?.Dispose();
         }
 
         public bool MoveNext()
         {
             if (listEnumerator == null)
             {
-                listEnumerator = DownloadData().GetEnumerator();
+                var data = DownloadData();
+                jsonDocument = data.Item2;
+                listEnumerator = data.Item1.GetEnumerator();
             }
 
             return listEnumerator.MoveNext();
         }
 
-        private IEnumerable<T> DownloadData()
+        private (IEnumerable<T>, JsonDocument) DownloadData()
         {
             var json = DownloadJson();
 
-            var jObject = JObject.Parse(json);
+            var jsonDocument = JsonDocument.Parse(json);
 
-            if (jObject.SelectToken(ErrorPathPropertyName) != null)
+            if (jsonDocument.RootElement.TryGetProperty(ErrorPathPropertyName, out var errorElement) && errorElement.ValueKind != JsonValueKind.Null)
             {
-                var errors = jObject[ErrorPathPropertyName].ToObject<List<GraphQueryError>>();
+                var errorElementRawText = errorElement.GetRawText();
+                var errors = JsonSerializer.Deserialize<List<GraphQueryError>>(errorElementRawText);
                 throw new GraphQueryExecutionException(errors, query);
             }
 
-            var enumerable = jObject[DataPathPropertyName][GraphQueryBuilder<T>.ResultAlias]
-                        .Select(token =>
-                        {
-                            var jsonSerializer = new JsonSerializer { ContractResolver = resolver };
-                            var jToken = queryType == QueryType.Collection ? token : token.Parent;
+            var dataElement = jsonDocument.RootElement.GetProperty(DataPathPropertyName);
+            var resultElement = dataElement.GetProperty(GraphQueryBuilder<T>.ResultAlias);
+            var enumerable = (resultElement.ValueKind == JsonValueKind.Array
+                ? (IEnumerable<JsonElement>)resultElement.EnumerateArray()
+                : new List<JsonElement> { resultElement }
+                )
+                .Select(jToken =>
+                {
+                    if (mapper != null)
+                    {
+                        var result = JsonSerializer.Deserialize<TSource>(jToken.GetRawText(), jsonSerializerOptions);
+                        return mapper.Invoke(result);
+                    }
 
-                            if (mapper != null)
-                            {
-                                var result = jToken.ToObject<TSource>(jsonSerializer);
-                                return mapper.Invoke(result);
-                            }
+                    var r = JsonSerializer.Deserialize<T>(jToken.GetRawText(), jsonSerializerOptions);
+                    return r;
+                });
 
-                            return jToken.ToObject<T>(jsonSerializer);
-                        });
-
-            return enumerable;
+            return (enumerable, jsonDocument);
         }
 
         private string DownloadJson()

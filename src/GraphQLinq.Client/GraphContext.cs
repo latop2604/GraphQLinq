@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using Newtonsoft.Json.Serialization;
+using System.Text.Json;
 
 namespace GraphQLinq
 {
@@ -12,12 +12,15 @@ namespace GraphQLinq
         {
             BaseUrl = baseUrl;
             Authorization = authorization;
-            ContractResolver = new DefaultContractResolver();
+            JsonSerializerOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
+            };
         }
 
         public string BaseUrl { get; }
         public string Authorization { get; }
-        public IContractResolver ContractResolver { get; set; }
+        public JsonSerializerOptions JsonSerializerOptions { get; set; }
 
         protected GraphCollectionQuery<T> BuildCollectionQuery<T>(object[] parameterValues, [CallerMemberName] string queryName = null)
         {

@@ -1,10 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Converters;
-using Newtonsoft.Json.Serialization;
+using System.Text.Json;
+using GraphQLinq.Client;
 using SpaceX;
 using Spectre.Console;
 using Spectre.Console.Rendering;
@@ -65,7 +63,12 @@ namespace GraphQLinq.Demo
 
             #region Multiple levels of Includes
             //Launch_date_unix and Static_fire_date_unix need custom converter
-            spaceXContext.ContractResolver = new SpaceXContractResolver();
+            spaceXContext.JsonSerializerOptions = new JsonSerializerOptions(spaceXContext.JsonSerializerOptions)
+            {
+                Converters = {
+                    new UnixDateTimeConverter(),
+                }
+            };
 
             var launches = spaceXContext.Launches(null, 10, 0, null, null)
                                         .Include(launch => launch.Links)
@@ -82,7 +85,7 @@ namespace GraphQLinq.Demo
             var table = new Table().Title("Launches");
             table.AddColumn(nameof(Launch.Mission_name), column => column.Width = 12).AddColumn(nameof(Launch.Launch_date_utc), column => column.Width = 15)
                  .AddColumn(nameof(Launch.Rocket.Rocket_name)).AddColumn(nameof(Launch.Links)).AddColumn(
-                     $"{nameof(Launch.Rocket.Second_stage.Payloads)}  {nameof(Payload.Manufacturer)}", column => column.Width=12);
+                     $"{nameof(Launch.Rocket.Second_stage.Payloads)}  {nameof(Payload.Manufacturer)}", column => column.Width = 12);
 
             foreach (var launch in launches)
             {
@@ -212,21 +215,5 @@ namespace GraphQLinq.Demo
         public string Ceo { get; set; }
         public string Name { get; set; }
         public AddressType Headquarters { get; set; }
-    }
-
-    public class SpaceXContractResolver : DefaultContractResolver
-    {
-        protected override JsonProperty CreateProperty(MemberInfo member, MemberSerialization memberSerialization)
-        {
-            var property = base.CreateProperty(member, memberSerialization);
-
-            var isDate = property.PropertyType == typeof(DateTime) || property.PropertyType == typeof(DateTime?);
-            if (isDate && property.PropertyName.Contains("unix"))
-            {
-                property.Converter = new UnixDateTimeConverter();
-            }
-
-            return property;
-        }
     }
 }
